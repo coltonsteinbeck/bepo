@@ -7,76 +7,72 @@ Quick reference for common operational tasks and troubleshooting.
 ### Starting the Bot
 
 ```bash
-# Production start (all services)
-npm run start:quick
+# Production start with PM2
+npm run pm2:start
 
-# Development mode (bot only, no tests)
+# Development mode (direct, no PM2)
 npm run dev
 
-# Individual services
-npm run start:bot-only
-npm run start:monitor
-npm run start:offline
+# First-time setup (PM2 + launchd)
+./scripts/pm2-setup.sh
 ```
 
 ### Stopping the Bot
 
 ```bash
-# Stop everything
-npm run stop
+# Stop bot
+npm run pm2:stop
 
-# Stop specific service
-npm run stop:bot
-npm run stop:monitor
-npm run stop:offline
+# Stop and remove from PM2
+pm2 delete bepo-bot
 ```
 
 ### Checking Status
 
 ```bash
-# Live health dashboard (refreshes every 5s)
-npm run health
+# PM2 process status
+npm run pm2:status
+pm2 status
 
-# Quick status check
-npm run status
+# PM2 dashboard (real-time)
+pm2 monit
 
-# Detailed status
-npm run status:detailed
+# Shell script status
+./scripts/bepo-status.sh
 ```
 
 ## 📊 Monitoring & Logs
 
+### External Monitoring (Healthchecks.io)
+
+The bot pings Healthchecks.io every 30 seconds as a dead-man's switch:
+- **Healthy**: Pings `/start` on startup, then pings every 30s
+- **Unhealthy/Shutdown**: Pings `/fail` endpoint
+- **Alerts**: Webhook notification to Discord if ping is missed
+
+Check your Healthchecks.io dashboard for monitoring status.
+
 ### Viewing Logs
 
 ```bash
-# List all available logs
-npm run logs
+# PM2 live logs
+pm2 logs bepo-bot
+npm run pm2:logs
 
-# Live tail (follow mode)
-npm run logs:bot          # Main bot
-npm run logs:monitor      # Monitor service
-npm run logs:offline      # Offline responses
-npm run logs:all          # All logs simultaneously
+# PM2 log files location
+ls logs/pm2/
 
-# Advanced log viewing
-npm run logs:follow serverOutput.log     # Live updates
-npm run logs:tail serverOutput.log 100   # Last 100 lines
-npm run logs:search "error"              # Search all logs
-npm run logs:stats                       # Statistics
+# Search logs
+grep "error" logs/pm2/bepo-bot-out.log
+grep "error" logs/pm2/bepo-bot-error.log
 ```
 
 ### Log Management
 
-```bash
-# Archive old logs (default: 7 days)
-npm run logs:archive
-
-# Cleanup very old logs (default: 30 days)
-npm run logs:cleanup
-
-# Rotate large logs (compress and archive)
-npm run logs:rotate
-```
+Logs are automatically managed:
+- **PM2 Log Rotation**: 10MB max file size, 14-day retention (via pm2-logrotate)
+- **Health Logs**: Auto-cleanup of files older than 14 days (built into bot.js)
+- **Critical Error Logs**: Auto-cleanup of files older than 14 days
 
 ## 🔧 Troubleshooting
 
@@ -84,76 +80,71 @@ npm run logs:rotate
 
 1. Check if bot is running:
    ```bash
-   npm run status
+   pm2 status
+   ./scripts/bepo-status.sh
    ```
 
 2. Check recent errors:
    ```bash
-   npm run logs:search "error"
+   pm2 logs bepo-bot --lines 100
    ```
 
 3. View live logs:
    ```bash
-   npm run logs:bot
+   pm2 logs bepo-bot
    ```
 
 4. Restart the bot:
    ```bash
-   npm run restart
+   npm run pm2:restart
+   pm2 restart bepo-bot
    ```
 
 ### High Error Rate
 
-1. View health dashboard:
-   ```bash
-   npm run health
-   ```
+1. Check Healthchecks.io dashboard for ping failures
 
 2. Search for specific errors:
    ```bash
-   npm run logs:search "Discord API"
-   npm run logs:search "rate limit"
-   npm run logs:search "timeout"
+   grep -i "Discord API\|rate limit\|timeout" logs/pm2/bepo-bot-error.log
    ```
 
-3. Check log statistics:
+3. Check PM2 metrics:
    ```bash
-   npm run logs:stats
+   pm2 monit
    ```
 
 ### Memory Issues
 
 1. Check process status:
    ```bash
-   npm run status:detailed
+   pm2 describe bepo-bot
    ```
 
-2. View recent errors:
+2. View memory usage:
    ```bash
-   npm run logs:search "memory\|heap"
+   pm2 monit
    ```
 
-3. Restart services:
+3. Restart if needed (auto-restart at 500MB):
    ```bash
-   npm run restart
+   pm2 restart bepo-bot
    ```
 
-4. Clean up old data:
-   ```bash
-   npm run cleanup:dry    # Preview
-   npm run cleanup        # Execute
-   ```
+4. PM2 will auto-restart on crash (max 10 restarts with 5s delay)
 
 ### Service Won't Start
 
-1. Check if port is in use:
+1. Check PM2 status:
    ```bash
-   lsof -i :3000  # Or your port
+   pm2 status
+   pm2 describe bepo-bot
    ```
 
 2. Kill stale processes:
    ```bash
-   npm run stop:all
+   pm2 delete bepo-bot
+   pkill -f "node.*src/bot.js"
    ```
 
 3. Check environment:
@@ -161,9 +152,9 @@ npm run logs:rotate
    cat .env | grep -v "^#" | grep -v "^$"
    ```
 
-4. Validate configuration:
+4. Start fresh:
    ```bash
-   npm run validate-offline
+   npm run pm2:start
    ```
 
 ## 🧹 Maintenance
@@ -171,53 +162,36 @@ npm run logs:rotate
 ### Regular Maintenance (Weekly)
 
 ```bash
-# 1. Archive old logs
-npm run logs:archive
+# 1. Check PM2 status and logs
+pm2 status
+pm2 logs bepo-bot --lines 50
 
-# 2. Clean up repository
-npm run cleanup:dry    # Preview first
-npm run cleanup
+# 2. Check Healthchecks.io dashboard for any missed pings
 
-# 3. Check health
-npm run health:once
-
-# 4. Review error logs
-npm run logs:search "CRITICAL"
+# 3. Review error logs
+grep -i "critical\|error" logs/pm2/bepo-bot-error.log | tail -50
 ```
 
-### Deep Clean (Monthly)
+### Automatic Maintenance
 
-```bash
-# 1. Stop all services
-npm run stop
-
-# 2. Clean up old logs (30+ days)
-npm run logs:cleanup 30
-
-# 3. Clean repository
-npm run cleanup:force
-
-# 4. Rotate all logs
-npm run logs:rotate
-
-# 5. Restart services
-npm run start:quick
-
-# 6. Verify health
-npm run health:once
-```
+The following are handled automatically:
+- **Log Rotation**: PM2-logrotate (10MB max, 14 days retention)
+- **Health Logs**: Cleaned up every 6 hours (14-day retention)
+- **Auto-Restart**: PM2 restarts on crash (max 10, 5s delay)
+- **Memory Limit**: PM2 restarts at 500MB
+- **Boot Persistence**: launchd starts PM2 on system boot
 
 ### Before Deploying Changes
 
 ```bash
 # 1. Run tests
-npm run test
+npm test
 
 # 2. Check status
-npm run status
+pm2 status
 
-# 3. Stop services
-npm run stop
+# 3. Stop bot
+pm2 stop bepo-bot
 
 # 4. Deploy changes (git pull, etc.)
 
@@ -227,11 +201,12 @@ npm install
 # 6. Deploy commands if needed
 npm run deploy
 
-# 7. Start services
-npm run start:quick
+# 7. Start bot
+pm2 start bepo-bot
 
-# 8. Monitor for issues
-npm run health
+# 8. Save PM2 state and monitor
+pm2 save
+pm2 logs bepo-bot
 ```
 
 ## 📈 Performance Monitoring
@@ -239,23 +214,26 @@ npm run health
 ### Real-time Monitoring
 
 ```bash
-# Health dashboard (auto-refresh)
-npm run health
+# PM2 dashboard (CPU, memory, logs)
+pm2 monit
 
 # Live log monitoring
-npm run logs:follow serverOutput.log
+pm2 logs bepo-bot
 ```
+
+### External Monitoring
+
+- **Healthchecks.io Dashboard**: View ping history and uptime
+- **Discord Webhook**: Receives alerts when bot goes down or shuts down
 
 ### Historical Analysis
 
 ```bash
-# Log statistics
-npm run logs:stats
+# Search logs for patterns
+grep -i "slow response\|timeout\|rate limit" logs/pm2/bepo-bot-*.log
 
-# Search for patterns
-npm run logs:search "slow response"
-npm run logs:search "timeout"
-npm run logs:search "rate limit"
+# View PM2 restart history
+pm2 describe bepo-bot | grep -A5 "restart"
 ```
 
 ## 🔐 Security
@@ -307,23 +285,24 @@ npm run logs:search "WARN"
 ### Bot is Completely Down
 
 ```bash
-# 1. Force stop everything
-npm run stop:all
+# 1. Check Healthchecks.io - you should have received a Discord alert
 
-# 2. Check for zombie processes
-ps aux | grep node
+# 2. Check PM2 status
+pm2 status
 
-# 3. Kill if necessary
+# 3. If PM2 shows errored, check logs
+pm2 logs bepo-bot --lines 100
+
+# 4. Force restart if needed
+pm2 delete bepo-bot
 pkill -9 -f "node.*src/bot.js"
 
-# 4. Clear any locks
-rm -f /tmp/bepo-*.lock
-
 # 5. Start fresh
-npm run start:quick
+npm run pm2:start
 
-# 6. Monitor closely
-npm run health
+# 6. Save state and monitor
+pm2 save
+pm2 logs bepo-bot
 ```
 
 ### Database Connection Issues
@@ -386,22 +365,30 @@ cat .env | sed 's/=.*/=***/' > config.txt
 ## 🎯 Quick Command Reference
 
 ```bash
-# Start/Stop
-npm run start:quick     # Start all
-npm run stop           # Stop all
-npm run restart        # Restart all
+# Start/Stop/Restart
+npm start              # Start bot with PM2
+npm stop               # Stop bot
+npm restart            # Restart bot
+npm run start:full     # Deploy commands + start + save
+npm run restart:full   # Deploy commands + restart + save
 
-# Status
-npm run health         # Live dashboard
-npm run status         # Quick check
+# Development
+npm run dev            # Run directly (no PM2)
+
+# Status & Monitoring
+npm run status         # Detailed status
+npm run pm2:status     # PM2 process status
+npm run pm2:monit      # Live dashboard
 
 # Logs
-npm run logs           # List logs
-npm run logs:bot       # View bot logs
-npm run logs:search    # Search logs
+npm run pm2:logs       # Live PM2 logs
+npm run logs:bot       # Tail stdout log
+npm run logs:error     # Tail error log
 
-# Maintenance
-npm run cleanup        # Clean repository
-npm run logs:rotate    # Rotate logs
-npm run logs:archive   # Archive old logs
+# First-Time Setup
+npm run pm2:setup      # Install PM2 + launchd
+
+# PM2 Utilities
+npm run pm2:save       # Save process list
+npm run pm2:delete     # Remove from PM2
 ```

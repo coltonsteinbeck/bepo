@@ -4,37 +4,60 @@
 
 ### Check Bot Status
 ```bash
-npm run status           # Overall health check
-./bepo-status.sh         # Detailed system status
+pm2 status              # PM2 process status
+pm2 monit               # Real-time dashboard
+./scripts/bepo-status.sh # Shell script status
 ```
+
+### Check External Monitoring
+- **Healthchecks.io Dashboard**: View ping history and missed pings
+- **Discord Webhook**: Check for shutdown/crash notifications
 
 ### Common Issues
 
 #### Bot Won't Start
-1. **Check Environment Variables**
+1. **Check PM2 Status**
+   ```bash
+   pm2 status
+   pm2 describe bepo-bot
+   ```
+
+2. **Check Environment Variables**
    ```bash
    # Verify required variables are set
    echo $DISCORD_TOKEN
    echo $SUPABASE_URL
    echo $SUPABASE_KEY
+   echo $HEALTHCHECK_PING_URL
    ```
 
-2. **Check Dependencies**
+3. **Check Dependencies**
    ```bash
    npm install              # Reinstall dependencies
    node --version          # Ensure Node.js 18+
    ```
 
-3. **Check Ports**
+4. **Check PM2 Logs**
    ```bash
-   lsof -i :3000           # Check if port is in use
+   pm2 logs bepo-bot --lines 100
    ```
 
 #### Bot Goes Offline Unexpectedly
 
+**Check Healthchecks.io:**
+- Login to Healthchecks.io dashboard
+- Check when last ping was received
+- Review ping history for patterns
+
+**Check PM2 Auto-Restart:**
+```bash
+pm2 describe bepo-bot | grep -A10 "status\|restart"
+```
+PM2 auto-restarts on crash (max 10 restarts with 5s delay)
+
 **Memory Issues:**
-- Check memory usage: `ps aux | grep node`
-- Restart if memory > 1GB: `npm restart`
+- PM2 auto-restarts at 500MB memory limit
+- Check: `pm2 monit`
 
 **Database Connection:**
 - Test connection: `node scripts/check-bot-status.js`
@@ -103,46 +126,45 @@ Invalid context type
 ```
 **Solution:** Use valid types: conversation, preference, summary, temporary
 
-## Offline Mode Issues
+## Healthchecks.io Issues
 
-### Webhook Responses Not Working
-1. **Check Webhook Configuration**
+### Pings Not Being Received
+1. **Check Environment Variable**
    ```bash
-   node scripts/setup-offline-responses.js
+   echo $HEALTHCHECK_PING_URL
    ```
 
-2. **Test Webhook Manually**
+2. **Test Ping Manually**
    ```bash
-   node scripts/test-offline-notifications.js
+   curl -fsS --retry 3 $HEALTHCHECK_PING_URL
    ```
 
-3. **Verify Monitor is Running**
+3. **Check Bot Logs**
    ```bash
-   ps aux | grep monitor
+   pm2 logs bepo-bot | grep -i "healthcheck\|ping"
    ```
 
-### Monitor Not Detecting Offline Status
-1. **Check Monitor Logs**
-   ```bash
-   tail -f logs/monitor.log
-   ```
-
-2. **Restart Monitor**
-   ```bash
-   npm run start:monitor
-   ```
+### False Alerts
+- Increase grace period in Healthchecks.io settings
+- Default ping interval is 30 seconds
+- Recommended grace period: 2-5 minutes
 
 ## Performance Issues
 
 ### High Memory Usage
-1. **Clear Memory Cache**
+1. **Check PM2 Memory Usage**
    ```bash
-   /memory clear type:temporary
+   pm2 monit
+   pm2 describe bepo-bot | grep memory
    ```
 
-2. **Restart Services**
+2. **PM2 Auto-Restart**
+   - Bot auto-restarts at 500MB memory limit
+   - Check restart count: `pm2 describe bepo-bot`
+
+3. **Manual Restart**
    ```bash
-   npm restart
+   pm2 restart bepo-bot
    ```
 
 ### Slow Response Times
@@ -185,38 +207,48 @@ node debug-imports.js    # Check module resolution
 
 ## Monitoring Commands
 
+### PM2 Commands
+```bash
+pm2 status              # Process status
+pm2 monit               # Real-time dashboard
+pm2 logs bepo-bot       # Live logs
+pm2 describe bepo-bot   # Detailed info
+pm2 restart bepo-bot    # Restart
+```
+
 ### Health Check Commands
 ```bash
-/health                  # Bot health status
+/health                  # Bot health status (Discord)
 /debug-memory [user]     # Memory debugging (admin)
-/test-errors [type]      # Test error handling
 ```
 
 ### Log Files
-- `logs/monitor.log` - Health monitor logs
+- `logs/pm2/bepo-bot-out.log` - Standard output
+- `logs/pm2/bepo-bot-error.log` - Error output
 - `logs/bot-status.json` - Current bot status
-- `logs/critical-errors-YYYY-MM-DD.json` - Error tracking
+- `logs/health-YYYY-MM-DD.json` - Daily health logs (14-day retention)
+- `logs/critical-errors-YYYY-MM-DD.json` - Error tracking (14-day retention)
 
 ## Getting Help
 
 ### Log Collection
 Before reporting issues, collect:
-1. Error messages from console
-2. Relevant log files from `logs/` directory
-3. Bot status: `npm run status`
-4. Environment: Node version, OS, Discord server details
+1. Error messages from PM2 logs
+2. PM2 status: `pm2 describe bepo-bot`
+3. Healthchecks.io ping history
+4. Environment: Node version, OS
 
 ### Debug Mode
 Enable verbose logging:
 ```bash
-DEBUG=bepo:* npm start
+DEBUG=bepo:* npm run dev
 ```
 
 ### Reset Everything
-Complete reset (development only):
+Complete reset:
 ```bash
-npm run stop
-rm -rf logs/*
-npm run start
-node scripts/deploy-commands.js
+npm run pm2:delete
+pkill -f "node.*src/bot.js"
+rm -rf logs/pm2/*
+npm run start:full
 ```

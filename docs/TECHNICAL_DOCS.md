@@ -2,6 +2,56 @@
 
 ## System Architecture
 
+### Process Management & Monitoring
+
+#### PM2 Configuration (`ecosystem.config.cjs`)
+```javascript
+module.exports = {
+  apps: [{
+    name: 'bepo-bot',
+    script: 'src/bot.js',
+    instances: 1,
+    autorestart: true,
+    max_restarts: 10,
+    min_uptime: '10s',
+    restart_delay: 5000,
+    max_memory_restart: '500M',
+    error_file: 'logs/pm2/bepo-bot-error.log',
+    out_file: 'logs/pm2/bepo-bot-out.log',
+    kill_timeout: 10000
+  }]
+};
+```
+
+#### External Monitoring (Healthchecks.io)
+The bot uses Healthchecks.io as a dead-man's switch:
+- **Ping Interval**: Every 30 seconds
+- **Startup**: Pings `/start` endpoint
+- **Heartbeat**: Pings base URL on healthy status
+- **Failure**: Pings `/fail` endpoint on unhealthy or shutdown
+- **Alerts**: Webhook to Discord on missed pings
+
+#### Health Monitor (`src/utils/healthMonitor.js`)
+```javascript
+// Key methods:
+- constructor(): Starts metrics collection, initial healthcheck ping
+- pingHealthcheck(status): Pings Healthchecks.io with status (start/fail/ok)
+- signalShutdown(): Signals intentional shutdown to healthcheck
+- checkHealth(): Internal health status check
+- startMetricsCollection(): 30-second interval for metrics + ping
+```
+
+#### Graceful Shutdown (`src/bot.js`)
+- Signals Healthchecks.io via `/fail` endpoint
+- Sends Discord webhook notification (orange embed)
+- 10-second timeout for cleanup
+- Handles SIGINT, SIGTERM, unhandledRejection
+
+#### Boot Persistence
+- **launchd**: macOS service to start PM2 on system boot
+- Setup: `pm2 startup launchd` (run during `./scripts/pm2-setup.sh`)
+- State: `pm2 save` persists running processes
+
 ### Memory System Implementation
 
 #### Database Schema
@@ -136,6 +186,19 @@ const probability = 0.18; // 18% for other reactions
 5. Generate AI response with context
 6. Store conversation in memory system
 7. Update thread activity if applicable
+```
+
+### Health & Monitoring Integration
+```javascript
+// Startup:
+1. Initialize HealthMonitor (pings Healthchecks.io /start)
+2. Start 30-second heartbeat interval
+3. Start 6-hour log cleanup interval (14-day retention)
+
+// Shutdown:
+1. healthMonitor.signalShutdown() - pings /fail
+2. sendShutdownWebhook() - Discord notification
+3. client.destroy() - disconnect from Discord
 ```
 
 ### Memory Context Integration

@@ -5,52 +5,56 @@
 ### Prerequisites
 - Ensure Discord bot token is configured
 - Make sure all dependencies are installed: `npm install`
-- Verify tmux is available: `which tmux`
+- Verify PM2 is installed: `pm2 --version`
+- Verify Healthchecks.io URL is configured: `echo $HEALTHCHECK_PING_URL`
 
 ## Core System Tests
 
-### 1. Shell Script Integration Test
+### 1. PM2 Setup Test
 ```bash
-# Test the main startup script
-./scripts/start-bepo.sh
+# First-time setup (if not already done)
+./scripts/pm2-setup.sh
 
-# Expected: Creates tmux session with 3 windows:
-# - Window 0: Bepo-Main (main bot)
-# - Window 1: Monitor (health monitoring)  
-# - Window 2: Offline-Responder (mention responses)
+# Expected:
+# - PM2 installed globally
+# - pm2-logrotate configured (10MB, 14 days)
+# - Bot started with PM2
+# - launchd configured for boot persistence
 
-# Check session is running
-tmux list-sessions
+# Check PM2 status
+pm2 status
 
-# Attach to view logs
-tmux attach-session -t bepo-session
-
-# Navigate between windows: Ctrl+B then 0/1/2
+# Expected: bepo-bot showing as 'online'
 ```
 
-### 2. NPM Script Integration Test
+### 2. PM2 Process Management Test
 ```bash
-# Test status check
-npm run status
-
-# Expected: Shows current bot status (likely OFFLINE if not running)
-
-# Test start command (should call shell script)
+# Start bot
 npm start
 
-# Test stop command (should call shell script)
+# Check status
+npm run pm2:status
+npm run status
+
+# View logs
+npm run pm2:logs
+
+# Restart
+npm restart
+
+# Stop
 npm stop
+
+# Start with deploy
+npm run start:full
 ```
 
-### 3. Individual Component Tests
+### 3. Shell Script Test
 ```bash
-# Test individual components work
-npm run start:bot-only     # Just main bot
-npm run start:monitor      # Just health monitor
-npm run start:offline      # Just offline responder
-
-# Clean up
-npm run stop:all
+# Test shell scripts
+./scripts/bepo-status.sh   # Check status
+./scripts/start-bepo.sh    # Start via shell
+./scripts/stop-bepo.sh     # Stop via shell
 ```
 
 ## Gaming Integration Tests
@@ -70,83 +74,89 @@ In Discord, test these commands:
 /cs2prices <skin_name>                    # Test skin price lookup
 ```
 
-## Offline Mode Tests
-
-### 1. Offline Response Test
-```bash
-# Scenario 1: Bot healthy and running
-npm run start:bot-only
-# In Discord: Mention @YourBot
-# Expected: Normal response from main bot
-
-# Scenario 2: Bot completely offline
-npm run stop:bot
-npm run start:offline
-# In Discord: Mention @YourBot
-# Expected: Offline monitor responds with status
-```
-
-### 2. Health Status Test
-```bash
-# Check different health scenarios
-npm run test-scenarios
-
-# Expected output:
-# - Bepo Process Stopped (OFFLINE)
-# - Bepo Not Responding (OFFLINE)  
-# - Bepo Online (ONLINE)
-```
-
-### 3. Full System Test
-```bash
-# Start everything
-npm start
-
-# Check all components are running
-npm run status
-
-# Test offline detection
-# Stop main bot while keeping monitor running
-npm run stop:bot
-# In Discord: Mention @YourBot
-# Expected: Offline monitor detects and responds
-
-# Restart everything
-npm restart
-```
-
 ## Monitoring Tests
 
-### 1. Log File Tests
+### 1. Healthchecks.io Integration Test
 ```bash
-# Start system
-npm start
+# Start bot
+npm run pm2:start
 
-# Check log files are being created
-ls -la logs/
-tail -f serverOutput.log
-tail -f logs/monitor.log
-tail -f logs/offline-responses.log
+# Check Healthchecks.io dashboard
+# Expected: Pings received every 30 seconds
 
-# Expected: Logs showing bot activity, health checks, offline monitoring
+# Stop bot gracefully
+pm2 stop bepo-bot
+
+# Check Healthchecks.io dashboard
+# Expected: /fail ping received, status changes to DOWN
+
+# Check Discord webhook channel
+# Expected: Orange embed notification about shutdown
 ```
 
-### 2. Status File Tests
+### 2. Auto-Restart Test
+```bash
+# Start bot
+npm run pm2:start
+
+# Simulate crash
+pm2 describe bepo-bot | grep restart
+# Note the restart count
+
+# Kill the process forcefully
+pkill -9 -f "node.*src/bot.js"
+
+# Wait a few seconds and check
+pm2 status
+
+# Expected: Bot restarted automatically, restart count increased
+pm2 describe bepo-bot | grep restart
+```
+
+### 3. Memory Limit Test
+```bash
+# Check current memory usage
+pm2 monit
+
+# PM2 will auto-restart at 500MB (configured in ecosystem.config.cjs)
+# Check logs for memory-related restarts:
+grep -i "memory" logs/pm2/bepo-bot-*.log
+```
+
+### 4. Log File Tests
+```bash
+# Start system
+npm run pm2:start
+
+# Check PM2 log files
+ls -la logs/pm2/
+tail -f logs/pm2/bepo-bot-out.log
+tail -f logs/pm2/bepo-bot-error.log
+
+# Check health log files (auto-cleaned after 14 days)
+ls -la logs/health-*.json
+ls -la logs/critical-errors-*.json
+```
+
+### 5. Status File Tests
 ```bash
 # Check status files are being updated
 cat logs/bot-status.json
-cat logs/bot-status-monitor.json
 
-# Expected: JSON files with current bot status and timestamps
+# Expected: JSON with current bot status and timestamps
 ```
 
-### 3. Health Monitoring Tests
+### 6. Boot Persistence Test
 ```bash
-# Check health endpoint
-npm run status
+# Verify launchd is configured
+pm2 startup
 
-# Monitor health logs in real-time
-npm run logs
+# Save current state
+pm2 save
+
+# Reboot system and verify bot starts automatically
+# (manual test - reboot your machine)
+```
 
 ## Unit Testing
 
@@ -175,38 +185,40 @@ npm run test:coverage
 
 ### 1. Process Management Test
 ```bash
-# Check all processes are properly managed
-ps aux | grep -E "(bot\.js|bot-monitor|offline-response)"
+# Check PM2 is managing the bot
+pm2 status
 
-# Start system
-npm start
+# Start bot
+npm run pm2:start
 
-# Check processes are running
-ps aux | grep -E "(bot\.js|bot-monitor|offline-response)"
+# Verify process is running
+pm2 describe bepo-bot
+ps aux | grep "node.*src/bot.js"
 
-# Stop system
-npm stop
+# Stop bot
+npm run pm2:stop
 
-# Verify all processes stopped
-ps aux | grep -E "(bot\.js|bot-monitor|offline-response)"
+# Verify process stopped
+pm2 status
+ps aux | grep "node.*src/bot.js"
 ```
 
 ### 2. Recovery Test
 ```bash
-# Start system
-npm start
+# Start bot
+npm run pm2:start
 
-# Kill one component manually
-pkill -f "bot-monitor"
+# Kill process manually (simulating crash)
+pkill -9 -f "node.*src/bot.js"
 
-# Check if system detects the failure
-npm run status
+# Wait 5 seconds for PM2 auto-restart
+sleep 5
 
-# Test restart
-npm restart
+# Verify PM2 restarted the bot
+pm2 status
 
-# Verify all components are back
-npm run status
+# Check restart count increased
+pm2 describe bepo-bot | grep restart
 ```
 
 ### 3. Error Handling Test
@@ -226,11 +238,17 @@ mv .env.backup .env
 
 ## Success Criteria
 
-### Shell Scripts Working
-- npm start launches tmux session with 3 windows
-- All components start in proper order (bot → monitor → offline)
-- npm stop cleanly shuts down all processes
-- No orphaned processes after stop
+### PM2 Management Working
+- `npm run pm2:start` starts bot via PM2
+- `pm2 status` shows bot as 'online'
+- `pm2 logs bepo-bot` shows live logs
+- Bot auto-restarts on crash (max 10, 5s delay)
+- Bot restarts at 500MB memory limit
+
+### Healthchecks.io Working
+- Pings received every 30 seconds
+- `/fail` ping on graceful shutdown
+- Discord webhook receives alerts
 
 ### Gaming Integration Working
 - /apexnotify commands work properly
@@ -239,32 +257,38 @@ mv .env.backup .env
 - /maprotation shows current maps
 - /cs2 and /cs2prices work correctly
 
-### Offline Mode Working
-- Offline monitor detects when main bot is down
-- Responds to mentions with appropriate status
-- Health checks work continuously
-- Status files are updated regularly
+### Boot Persistence Working
+- launchd configured via `pm2 startup`
+- PM2 state saved via `pm2 save`
+- Bot starts automatically on system boot
 
 ### Integration Working
 - All npm scripts work correctly
-- Shell scripts integrate with npm scripts
-- Logs are properly separated and readable
-- Status checking works in all scenarios
+- Shell scripts integrate with PM2
+- Logs are properly separated (stdout/stderr)
+- 14-day log retention working
 
 ## Common Issues & Solutions
 
-### Issue: Tmux session already exists
+### Issue: PM2 not found
 ```bash
-# Solution: Stop existing session first
-./scripts/stop-bepo.sh
-./scripts/start-bepo.sh
+# Solution: Install PM2 globally
+npm install -g pm2
+```
+
+### Issue: Bot not auto-restarting
+```bash
+# Solution: Check PM2 config
+pm2 describe bepo-bot | grep -A5 restart
+# Verify max_restarts not exceeded
+pm2 reset bepo-bot  # Reset restart counter
 ```
 
 ### Issue: Processes not stopping cleanly
 ```bash
 # Solution: Force kill all
-npm run stop:all
-pkill -f "node.*bepo"
+pm2 delete bepo-bot
+pkill -f "node.*src/bot.js"
 ```
 
 ### Issue: Discord token errors
@@ -274,11 +298,12 @@ cat .env | grep BOT_TOKEN
 # Ensure token is valid and has proper permissions
 ```
 
-### Issue: Offline monitor not responding
+### Issue: Healthchecks.io not receiving pings
 ```bash
-# Solution: Check it's monitoring the right channels
-npm run setup-offline-responses
-# Verify bot has permissions in target channels
+# Solution: Check environment variable
+echo $HEALTHCHECK_PING_URL
+# Test manually
+curl -fsS $HEALTHCHECK_PING_URL
 ```
 
 ### Issue: Tests failing
@@ -290,66 +315,20 @@ npm run test:unit                         # Run unit tests only
 
 For additional troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
-### 1. Process Management Test
-```bash
-# Check all processes are properly managed
-ps aux | grep -E "(bot\.js|bot-monitor|offline-response)"
-
-# Start system
-npm start
-
-# Check processes are running
-ps aux | grep -E "(bot\.js|bot-monitor|offline-response)"
-
-# Stop system
-npm stop
-
-# Verify all processes stopped
-ps aux | grep -E "(bot\.js|bot-monitor|offline-response)"
-```
-
-### 2. Recovery Test
-```bash
-# Start system
-npm start
-
-# Kill one component manually
-pkill -f "bot-monitor"
-
-# Check if system detects the failure
-npm run status
-
-# Test restart
-npm restart
-
-# Verify all components are back
-npm run status
-```
-
-### 3. Error Handling Test
-```bash
-# Test with invalid configuration
-# (Temporarily rename .env file)
-mv .env .env.backup
-
-# Try to start
-npm start
-
-# Expected: Graceful error messages, no hanging processes
-
-# Restore configuration
-mv .env.backup .env
-```
-
 ---
 
 ## ✅ Success Criteria
 
-### Shell Scripts Working
-- [✅] `npm start` launches tmux session with 3 windows
-- [✅] All components start in proper order (bot → monitor → offline)
-- [✅] `npm stop` cleanly shuts down all processes
-- [✅] No orphaned processes after stop
+### PM2 Management Working
+- [✅] `npm run pm2:start` starts bot via PM2
+- [✅] `pm2 status` shows bot as 'online'
+- [✅] `pm2 logs bepo-bot` shows live logs
+- [✅] Bot auto-restarts on crash
+
+### Healthchecks.io Working
+- [✅] Pings received every 30 seconds
+- [✅] `/fail` ping on graceful shutdown
+- [✅] Discord webhook receives alerts
 
 ### APEX Mode Working
 - [✅] `/apexnotify` commands work properly
@@ -357,34 +336,32 @@ mv .env.backup .env
 - [✅] Can start/stop monitoring
 - [✅] `/maprotation` shows current maps
 
-### OFFLINE Mode Working
-- [✅] Offline monitor detects when main bot is down
-- [✅] Responds to mentions with appropriate status
-- [✅] Health checks work continuously
-- [✅] Status files are updated regularly
+### Boot Persistence Working
+- [✅] launchd configured via `pm2 startup`
+- [✅] PM2 state saved via `pm2 save`
+- [✅] Bot starts automatically on system boot
 
 ### Integration Working
 - [✅] All npm scripts work correctly
-- [✅] Shell scripts integrate with npm scripts
-- [✅] Logs are properly separated and readable
-- [✅] Status checking works in all scenarios
+- [✅] Shell scripts integrate with PM2
+- [✅] Logs properly separated (stdout/stderr)
+- [✅] 14-day log retention working
 
 ---
 
 ## 🚨 Known Issues & Solutions
 
-### Issue: Tmux session already exists
+### Issue: PM2 not found
 ```bash
-# Solution: Stop existing session first
-./stop-bepo.sh
-./start-bepo.sh
+# Solution: Run setup script
+./scripts/pm2-setup.sh
 ```
 
 ### Issue: Processes not stopping cleanly
 ```bash
 # Solution: Force kill all
-npm run stop:all
-pkill -f "node.*bepo"
+pm2 delete bepo-bot
+pkill -f "node.*src/bot.js"
 ```
 
 ### Issue: Discord token errors
@@ -394,11 +371,11 @@ cat .env | grep BOT_TOKEN
 # Ensure token is valid and has proper permissions
 ```
 
-### Issue: Offline monitor not responding
+### Issue: Healthchecks.io not receiving pings
 ```bash
-# Solution: Check it's monitoring the right channels
-npm run setup-offline-responses
-# Verify bot has permissions in target channels
+# Solution: Check environment variable
+echo $HEALTHCHECK_PING_URL
+curl -fsS $HEALTHCHECK_PING_URL
 ```
 
 ---

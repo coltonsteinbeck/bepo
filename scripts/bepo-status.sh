@@ -1,6 +1,6 @@
 #!/bin/bash
-# Bepo System Status Checker
-# Provides detailed status information about all Bepo services
+# Bepo System Status Checker (PM2 version)
+# Provides detailed status information about Bepo
 
 # Load configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,178 +15,112 @@ cd "$BEPO_ROOT" || {
     exit 1
 }
 
-# Function to check service health
-check_service_health() {
-    local service=$1
-    local log_file=""
-    
-    case $service in
-        "bot")
-            log_file="$BEPO_BOT_LOG"
+# Parse arguments
+QUIET_MODE=false
+DETAILED_MODE=false
+
+for arg in "$@"; do
+    case $arg in
+        -q|--quiet)
+            QUIET_MODE=true
+            shift
             ;;
-        "monitor")
-            log_file="$BEPO_MONITOR_LOG"
-            ;;
-        "offline")
-            log_file="$BEPO_OFFLINE_LOG"
+        -d|--detailed)
+            DETAILED_MODE=true
+            shift
             ;;
     esac
-    
-    if [ -f "$log_file" ]; then
-        local last_log=$(tail -1 "$log_file" 2>/dev/null)
-        local log_time=$(echo "$last_log" | grep -o '\[[^]]*\]' | head -1 | tr -d '[]')
+done
+
+if [ "$QUIET_MODE" = "false" ]; then
+    echo -e "${COLOR_CYAN}========================================${COLOR_NC}"
+    echo -e "${COLOR_CYAN}  Bepo Status Report${COLOR_NC}"
+    echo -e "${COLOR_CYAN}========================================${COLOR_NC}"
+    echo ""
+fi
+
+# Check PM2 status
+if command -v pm2 &> /dev/null; then
+    if pm2 describe $PM2_APP_NAME &> /dev/null; then
+        # Get PM2 process info
+        pm2_info=$(pm2 jlist 2>/dev/null | python3 -c "import sys, json; data = json.load(sys.stdin); app = next((a for a in data if a['name'] == '$PM2_APP_NAME'), None); print(json.dumps(app))" 2>/dev/null || echo "{}")
         
-        if [ -n "$log_time" ]; then
-            echo "    Last activity: $log_time"
+        status=$(echo "$pm2_info" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('pm2_env', {}).get('status', 'unknown'))" 2>/dev/null || echo "unknown")
+        pid=$(echo "$pm2_info" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('pid', 0))" 2>/dev/null || echo "0")
+        memory=$(echo "$pm2_info" | python3 -c "import sys, json; data = json.load(sys.stdin); m = data.get('monit', {}).get('memory', 0); print(f'{m / 1024 / 1024:.1f}')" 2>/dev/null || echo "0")
+        cpu=$(echo "$pm2_info" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('monit', {}).get('cpu', 0))" 2>/dev/null || echo "0")
+        restarts=$(echo "$pm2_info" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('pm2_env', {}).get('restart_time', 0))" 2>/dev/null || echo "0")
+        uptime=$(echo "$pm2_info" | python3 -c "import sys, json; data = json.load(sys.stdin); u = data.get('pm2_env', {}).get('pm_uptime', 0); import time; diff = int((time.time() * 1000 - u) / 1000); h = diff // 3600; m = (diff % 3600) // 60; print(f'{h}h {m}m')" 2>/dev/null || echo "0h 0m")
+
+        if [ "$status" = "online" ]; then
+            print_status $COLOR_GREEN "🟢 Bepo is ONLINE"
         else
-            echo "    Last activity: Unknown"
+            print_status $COLOR_RED "🔴 Bepo is $status"
         fi
         
-        # Check for recent errors
-        local error_count=$(tail -20 "$log_file" 2>/dev/null | grep -i "error\|crash\|fail" | wc -l)
-        if [ "$error_count" -gt 0 ]; then
-            print_status $COLOR_YELLOW "    Recent errors: $error_count (check logs)"
-        else
-            print_status $COLOR_GREEN "    Health: Good"
-        fi
+        echo ""
+        print_status $COLOR_CYAN "PM2 Process Info:"
+        echo "  Status:    $status"
+        echo "  PID:       $pid"
+        echo "  Memory:    ${memory} MB"
+        echo "  CPU:       ${cpu}%"
+        echo "  Uptime:    $uptime"
+        echo "  Restarts:  $restarts"
     else
-        print_status $COLOR_YELLOW "    Log file not found: $log_file"
+        print_status $COLOR_RED "🔴 Bepo is not registered with PM2"
+        print_status $COLOR_YELLOW "Run ./scripts/start-bepo.sh to start"
     fi
-}
-
-# Function to show detailed service information
-show_detailed_status() {
-    print_status $COLOR_CYAN "Detailed Service Status:"
-    echo ""
+else
+    print_status $COLOR_YELLOW "⚠️  PM2 not installed"
     
-    # Bot service
-    print_status $COLOR_BLUE "Main Bot Service:"
-    local bot_pids=$(get_bepo_pids "bot")
-    if [ -n "$bot_pids" ]; then
-        print_status $COLOR_GREEN "  Status: Running"
-        echo "  Process ID(s): $bot_pids"
-        check_service_health "bot"
-        
-        # Check Discord connection status if status file exists
-        if [ -f "logs/bot-status.json" ]; then
-            local discord_status=$(jq -r '.discord.connected // "unknown"' logs/bot-status.json 2>/dev/null)
-            local bot_online=$(jq -r '.botStatus.isOnline // "unknown"' logs/bot-status.json 2>/dev/null)
-            echo "  Discord connected: $discord_status"
-            echo "  Bot online: $bot_online"
-        fi
+    # Fallback to pgrep
+    BOT_PIDS=$(pgrep -f "$BOT_PROCESS_PATTERN" 2>/dev/null || true)
+    if [ -n "$BOT_PIDS" ]; then
+        print_status $COLOR_GREEN "🟢 Bot process running (PID: $BOT_PIDS)"
     else
-        print_status $COLOR_RED "  Status: Not running"
+        print_status $COLOR_RED "🔴 Bot process not found"
     fi
-    echo ""
-    
-    # Monitor service
-    if should_enable_service "monitor"; then
-        print_status $COLOR_BLUE "Bot Monitor Service:"
-        local monitor_pids=$(get_bepo_pids "monitor")
-        if [ -n "$monitor_pids" ]; then
-            print_status $COLOR_GREEN "  Status: Running"
-            echo "  Process ID(s): $monitor_pids"
-            check_service_health "monitor"
-        else
-            print_status $COLOR_RED "  Status: Not running"
-        fi
-        echo ""
-    fi
-    
-    # Offline service
-    if should_enable_service "offline"; then
-        print_status $COLOR_BLUE "Offline Response Service:"
-        local offline_pids=$(get_bepo_pids "offline")
-        if [ -n "$offline_pids" ]; then
-            print_status $COLOR_GREEN "  Status: Running"
-            echo "  Process ID(s): $offline_pids"
-            check_service_health "offline"
-        else
-            print_status $COLOR_RED "  Status: Not running"
-        fi
-        echo ""
-    fi
-}
+fi
 
-# Function to show log summary
-show_log_summary() {
-    print_status $COLOR_CYAN "Recent Log Summary:"
-    echo ""
+# Check bot-status.json for additional info
+echo ""
+print_status $COLOR_CYAN "Bot Health Status:"
+if [ -f "$BEPO_STATUS_FILE" ]; then
+    discord_connected=$(cat "$BEPO_STATUS_FILE" | python3 -c "import sys, json; data = json.load(sys.stdin); print('Yes' if data.get('discord', {}).get('connected', False) else 'No')" 2>/dev/null || echo "Unknown")
+    discord_ping=$(cat "$BEPO_STATUS_FILE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('discord', {}).get('ping', 'N/A'))" 2>/dev/null || echo "N/A")
+    guilds=$(cat "$BEPO_STATUS_FILE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('discord', {}).get('guilds', 0))" 2>/dev/null || echo "0")
+    error_count=$(cat "$BEPO_STATUS_FILE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('health', {}).get('errorCount', 0))" 2>/dev/null || echo "0")
+    last_updated=$(cat "$BEPO_STATUS_FILE" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('lastUpdated', 'Unknown'))" 2>/dev/null || echo "Unknown")
     
-    for log_file in "$BEPO_BOT_LOG" "$BEPO_MONITOR_LOG" "$BEPO_OFFLINE_LOG"; do
-        if [ -f "$log_file" ]; then
-            local basename=$(basename "$log_file")
-            echo "$basename (last 3 lines):"
-            tail -3 "$log_file" 2>/dev/null | sed 's/^/    /'
-            echo ""
-        fi
-    done
-}
+    echo "  Discord:   $discord_connected (ping: ${discord_ping}ms)"
+    echo "  Guilds:    $guilds"
+    echo "  Errors:    $error_count"
+    echo "  Updated:   $last_updated"
+else
+    print_status $COLOR_YELLOW "  Status file not found"
+fi
 
-# Function to show tmux session info
-show_tmux_info() {
-    if tmux has-session -t $BEPO_SESSION_NAME 2>/dev/null; then
-        print_status $COLOR_CYAN "Tmux Session Details:"
-        echo ""
-        tmux list-windows -t $BEPO_SESSION_NAME -F "  Window #{window_index}: #{window_name} (#{window_panes} panes)" 2>/dev/null
-        echo ""
-        print_status $COLOR_GREEN "To attach: tmux attach-session -t $BEPO_SESSION_NAME"
-        print_status $COLOR_GREEN "To list windows: tmux list-windows -t $BEPO_SESSION_NAME"
-        echo ""
+# Show Healthchecks.io status reminder
+echo ""
+print_status $COLOR_CYAN "External Monitoring:"
+echo "  Healthchecks.io: Check your dashboard for ping status"
+echo "  Interval: Every 30 seconds"
+
+if [ "$DETAILED_MODE" = "true" ]; then
+    echo ""
+    print_status $COLOR_CYAN "Recent Logs (last 10 lines):"
+    if [ -f "$BEPO_BOT_LOG" ]; then
+        tail -10 "$BEPO_BOT_LOG" 2>/dev/null || echo "  Could not read log file"
     else
-        print_status $COLOR_RED "No tmux session found"
-        echo ""
+        echo "  Log file not found: $BEPO_BOT_LOG"
     fi
-}
+fi
 
-# Main function
-main() {
-    clear
-    print_status $COLOR_PURPLE "Bepo System Status Check"
-    print_status $COLOR_PURPLE "=========================="
-    
-    # Setup log directories
-    setup_log_directories
-    
-    # Show configuration
-    show_configuration
-    
-    # Show basic status
-    show_service_status
-    
-    # Show detailed status
-    show_detailed_status
-    
-    # Show tmux info
-    show_tmux_info
-    
-    # Show log summary if requested
-    if [ "$1" = "--logs" ] || [ "$1" = "-l" ]; then
-        show_log_summary
-    fi
-    
-    # Show help
+if [ "$QUIET_MODE" = "false" ]; then
     echo ""
-    print_status $COLOR_CYAN "Quick Commands:"
-    echo "  npm run health           # Live health dashboard"
-    echo "  npm run start:quick      # Start all services"
-    echo "  npm run stop             # Stop all services"
-    echo "  npm run logs             # List available logs"
-    echo "  npm run logs:bot         # View bot logs"
-    echo "  npm run logs:search      # Search logs"
-    echo ""
-    print_status $COLOR_CYAN "Advanced Commands:"
-    echo "  npm run cleanup          # Clean old logs & files"
-    echo "  npm run logs:rotate      # Rotate large logs"
-    echo "  npm run dev:helper       # Interactive dev menu"
-    echo ""
-    
-    print_status $COLOR_CYAN "Configuration:"
-    echo "  Disable monitor: ENABLE_BOT_MONITOR=false ./start-bepo.sh"
-    echo "  Disable offline: ENABLE_OFFLINE_MODE=false ./start-bepo.sh"
-    echo "  Edit config: vim bepo-config.sh"
-    echo ""
-}
-
-# Run main function
-main "$@"
+    print_status $COLOR_CYAN "Commands:"
+    echo "  pm2 logs $PM2_APP_NAME   - View live logs"
+    echo "  pm2 monit                - Real-time monitoring"
+    echo "  ./scripts/start-bepo.sh - Start bot"
+    echo "  ./scripts/stop-bepo.sh  - Stop bot"
+fi

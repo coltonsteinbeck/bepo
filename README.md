@@ -1,6 +1,6 @@
 # Bepo - Discord Bot
 
-A feature-rich Discord bot with robust offline mode, health monitoring, and game integration.
+A feature-rich Discord bot with PM2 process management, Healthchecks.io monitoring, and game integration.
 
 ## Quick Start
 
@@ -11,11 +11,14 @@ npm install
 # Configure environment
 cp .env.example .env
 # Edit .env with your tokens and configuration
+# Required: DISCORD_TOKEN, SUPABASE_URL, SUPABASE_KEY
+# Required: HEALTHCHECK_PING_URL, DISCORD_ALERT_WEBHOOK
 
-# Start the bot system
-./start-bepo.sh
+# First-time setup (installs PM2, configures launchd)
+./scripts/pm2-setup.sh
 
 # Check status
+pm2 status
 ./scripts/bepo-status.sh
 ```
 
@@ -53,51 +56,45 @@ All documentation has been moved to the [`docs/`](./docs/) folder:
 ## ⚡ Key Features
 
 - **🤖 Discord Bot**: Slash commands, interactive embeds, and rich responses
-- **📡 Offline Mode**: Automatic mention responses when main bot is down
-- **🔍 Health Monitoring**: Real-time status checking and alerting
+- **📊 PM2 Process Management**: Auto-restart, memory limits, log rotation
+- **🔔 External Monitoring**: Healthchecks.io dead-man's switch with Discord alerts
+- **🔄 Boot Persistence**: launchd ensures bot starts on system boot
 - **🎮 Game Integration**: Apex Legends and CS2 updates
-- **🛠️ Process Management**: tmux-based service control
-- **📊 Enhanced Status**: Detailed shutdown reason detection
+- **📝 Automatic Log Cleanup**: 14-day retention for health and error logs
 
-## 🚀 Recent Updates
+## 🚀 Architecture
 
-### Offline Health Command
-
-- **New**: Health/status requests work even when bot is offline
-- **Usage**: `@Bepo health`, `@Bepo status`, or `@Bepo /health`
-- **Features**: Detailed shutdown reasons, recovery status, and maintenance info
-
-### Improved Documentation
-
-- **Organized**: All `.md` files moved to `docs/` folder
-- **Enhanced**: Better testing guides and quick references
-- **Updated**: Reflects latest offline mode improvements
+| Component | Purpose |
+|-----------|----------|
+| PM2 | Process management, auto-restart, log rotation |
+| Healthchecks.io | External monitoring (30s dead-man's switch) |
+| launchd | Boot persistence (macOS) |
+| Discord Webhook | Shutdown/crash notifications |
 
 ## 📋 Quick Commands
 
 ```bash
-# Service Management
-npm run start:quick      # Start full system
-npm run stop             # Stop everything
-npm run restart          # Restart all services
-npm run status           # Check system status
+# Start/Stop/Restart
+npm start                # Start bot with PM2
+npm stop                 # Stop bot
+npm restart              # Restart bot
+npm run start:full       # Deploy + start + save state
+npm run restart:full     # Deploy + restart + save state
 
-# Health & Monitoring
-npm run health           # Real-time health dashboard
-npm run health:once      # Single status snapshot
+# Development
+npm run dev              # Run directly without PM2
+npm test                 # Run tests
+npm run deploy           # Deploy slash commands
 
-# Logs & Debugging
-npm run logs             # List all log files
-npm run logs:bot         # View bot logs
-npm run logs:follow serverOutput.log  # Live tail
-npm run logs:search "error"  # Search across logs
-npm run logs:stats       # Log statistics
+# Status & Monitoring
+npm run status           # Detailed status report
+npm run pm2:status       # PM2 process status
+npm run pm2:monit        # Real-time dashboard
+npm run pm2:logs         # Live logs
 
-# Maintenance
-npm run logs:rotate      # Rotate large logs
-npm run logs:archive     # Archive old logs
-npm run logs:cleanup     # Delete old logs
-npm run cleanup          # Clean up repository
+# First-Time Setup
+npm run pm2:setup        # Install PM2 + launchd
+npm run pm2:save         # Save PM2 state
 ```
 
 ## 🔧 Architecture

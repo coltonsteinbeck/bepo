@@ -29,20 +29,22 @@
     "deploy": "node --no-deprecation scripts/deploy-commands.js",
     "delete": "node --no-deprecation scripts/delete-commands.js",
     "generate": "node --no-deprecation src/dalle/cli.js generate",
-    "start": "node --no-deprecation src/bot.js",
-    "start:quick": "./scripts/start-bepo.sh",
-    "start:full": "node --no-deprecation src/bot.js & node --no-deprecation scripts/monitor-service.js & node --no-deprecation scripts/offline-response-system.js",
-    "start:bot-only": "./scripts/start-bot-only.sh",
-    "start:bot-direct": "node --no-deprecation src/bot.js",
-    "start:monitor": "node --no-deprecation scripts/monitor-service.js",
-    "start:offline": "node --no-deprecation scripts/offline-response-system.js",
-    "stop": "./scripts/stop-bepo.sh",
-    "stop:all": "pkill -f 'node.*src/bot.js' || true; pkill -f 'node.*monitor-service.js' || true; pkill -f 'node.*offline-response-system.js' || true",
-    "stop:bot": "./scripts/stop-bot-only.sh",
-    "stop:monitor": "pkill -f 'node.*monitor-service.js' || true",
-    "stop:offline": "pkill -f 'node.*offline-response-system.js' || true",
-    "restart": "npm run stop && sleep 2 && npm run start",
+    
+    "start": "pm2 start ecosystem.config.cjs",
+    "start:full": "npm run deploy && pm2 start ecosystem.config.cjs && pm2 save",
+    "stop": "pm2 stop bepo-bot",
+    "restart": "pm2 restart bepo-bot",
+    "restart:full": "npm run deploy && pm2 restart bepo-bot && pm2 save",
+    
     "dev": "node --no-deprecation src/bot.js",
+    
+    "pm2:setup": "./scripts/pm2-setup.sh",
+    "pm2:status": "pm2 status bepo-bot",
+    "pm2:logs": "pm2 logs bepo-bot",
+    "pm2:monit": "pm2 monit",
+    "pm2:save": "pm2 save",
+    "pm2:delete": "pm2 delete bepo-bot",
+    
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
@@ -60,21 +62,17 @@
     "logs:stats": "node scripts/log-manager.js stats",
     "logs:archive": "node scripts/log-manager.js archive",
     "logs:cleanup": "node scripts/log-manager.js cleanup",
-    "logs:bot": "tail -f logs/serverOutput.log",
-    "logs:monitor": "tail -f logs/monitorOutput.log",
-    "logs:offline": "tail -f logs/offlineOutput.log",
-    "logs:all": "tail -f logs/serverOutput.log logs/monitorOutput.log logs/offlineOutput.log",
+    "logs:bot": "tail -f logs/pm2/bepo-out.log",
+    "logs:error": "tail -f logs/pm2/bepo-error.log",
     "logs:rotate": "./scripts/rotate-logs.sh",
-    "monitor": "node scripts/bot-monitor.js",
+    
     "setup-webhooks": "node scripts/setup-webhook-notifications.js",
-    "setup-offline-responses": "node scripts/setup-offline-responses.js",
-    "validate-offline": "node scripts/validate-offline-setup.js",
+    
     "cleanup": "node scripts/cleanup-repo.js",
     "cleanup:dry": "node scripts/cleanup-repo.js --dry-run",
     "cleanup:force": "node scripts/cleanup-repo.js --force",
-    "dev:helper": "node scripts/dev-helper.js",
-    "prestart": "npm run test",
-    "prebuild": "npm run test"
+    
+    "dev:helper": "node scripts/dev-helper.js"
   },
   "bin": {
     "bepo": "./src/cli.js"

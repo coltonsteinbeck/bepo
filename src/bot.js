@@ -1,6 +1,7 @@
 import { Client, Collection, Guild, AttachmentBuilder, MessageFlags } from "discord.js";
 import dotenv from "dotenv";
 import { OpenAI } from "openai";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import drawCommand from "./commands/fun/draw.js";
@@ -56,8 +57,47 @@ import healthMonitor from "./utils/healthMonitor.js";
 import { getStatusChecker } from "./utils/statusChecker.js";
 import { initializeCS2Monitoring } from "./utils/cs2NotificationService.js";
 import { initializeApexMonitoring } from "./utils/apexNotificationService.js";
-// Import the new unified monitoring service
-import UnifiedMonitoringService from '../scripts/monitor-service.js';
+
+// Shutdown state tracking file
+const SHUTDOWN_STATE_FILE = path.join(process.cwd(), 'logs', 'shutdown-state.json');
+
+// Helper functions for crash detection
+function markShutdownClean() {
+  try {
+    fs.writeFileSync(SHUTDOWN_STATE_FILE, JSON.stringify({
+      cleanShutdown: true,
+      timestamp: new Date().toISOString()
+    }));
+  } catch (err) {
+    console.error('Failed to mark shutdown as clean:', err);
+  }
+}
+
+function markBotRunning() {
+  try {
+    fs.writeFileSync(SHUTDOWN_STATE_FILE, JSON.stringify({
+      cleanShutdown: false,
+      running: true,
+      startTime: new Date().toISOString()
+    }));
+  } catch (err) {
+    console.error('Failed to mark bot as running:', err);
+  }
+}
+
+function wasLastShutdownClean() {
+  try {
+    if (!fs.existsSync(SHUTDOWN_STATE_FILE)) {
+      return true; // First run, assume clean
+    }
+    const data = JSON.parse(fs.readFileSync(SHUTDOWN_STATE_FILE, 'utf8'));
+    return data.cleanShutdown === true;
+  } catch (err) {
+    console.error('Failed to read shutdown state:', err);
+    return true; // Assume clean on error
+  }
+}
+
 // Import reply chain tracking
 import {
   isReplyMessage,
@@ -111,24 +151,54 @@ client.on('shardReconnecting', (shardId) => {
 });
 
 // Add graceful shutdown handler
-process.on('SIGINT', async () => {
-  console.log('🛑 Received SIGINT (Ctrl+C), shutting down gracefully...');
-  await gracefulShutdown();
+let isShuttingDown = false;
+
+// Helper to handle shutdown signals
+async function handleShutdownSignal(signal) {
+  if (isShuttingDown) {
+    console.log(`Already shutting down, ignoring ${signal}`);
+    return;
+  }
+  isShuttingDown = true;
+  
+  console.log(`🛑 ${signal} received, shutting down gracefully...`);
+  
+  try {
+    await gracefulShutdown();
+  } catch (err) {
+    console.error('Shutdown error:', err);
+    process.exit(1);
+  }
+}
+
+process.on('SIGINT', () => {
+  handleShutdownSignal('SIGINT');
 });
 
-process.on('SIGTERM', async () => {
-  console.log('🛑 Received SIGTERM, shutting down gracefully...');
-  await gracefulShutdown();
-});
-
-process.on('SHUTDOWN', async () => {
-  console.log('🛑 Received SHUTDOWN signal, shutting down gracefully...');
-  await gracefulShutdown();
+process.on('SIGTERM', () => {
+  handleShutdownSignal('SIGTERM');
 });
 
 async function gracefulShutdown() {
   try {
     console.log('🛑 Bot shutting down gracefully...');
+
+    // Signal shutdown to healthchecks.io FIRST (so external monitoring knows immediately)
+    console.log('Signaling shutdown to healthchecks.io...');
+    await safeAsync(async () => {
+      await healthMonitor.signalShutdown();
+      console.log('Healthchecks.io notified of shutdown');
+    }, (error) => {
+      console.error('Failed to signal healthchecks.io:', error);
+    }, 'healthcheck_shutdown');
+
+    // Send Discord webhook notification for intentional shutdown
+    console.log('Sending shutdown webhook notification...');
+    await safeAsync(async () => {
+      await sendShutdownWebhook();
+    }, (error) => {
+      console.error('Failed to send shutdown webhook:', error);
+    }, 'webhook_shutdown');
 
     // Update bot status to offline before shutting down
     const statusChecker = getStatusChecker();
@@ -205,6 +275,9 @@ async function gracefulShutdown() {
         console.error('Error destroying client:', destroyError);
       }
     }
+
+    // Mark this as a clean shutdown (for crash detection on next startup)
+    markShutdownClean();
 
     console.log('Graceful shutdown completed');
     process.exit(0);
@@ -285,6 +358,75 @@ function formatUptime(seconds) {
     return `${minutes}m ${secs}s`;
   } else {
     return `${secs}s`;
+  }
+}
+
+// Send webhook notification on intentional shutdown
+async function sendShutdownWebhook() {
+  const webhookUrl = process.env.DISCORD_ALERT_WEBHOOK;
+  if (!webhookUrl) {
+    console.log('No DISCORD_ALERT_WEBHOOK configured, skipping shutdown notification');
+    return;
+  }
+
+  try {
+    const uptimeMs = Date.now() - (healthMonitor.startTime || Date.now());
+    const uptime = formatUptime(Math.floor(uptimeMs / 1000));
+    
+    const embed = {
+      title: '🛑 Bepo Shutting Down',
+      color: 0xFFA500, // Orange for intentional shutdown
+      description: 'Bot is shutting down gracefully (intentional stop).',
+      fields: [
+        { name: '⏱️ Uptime', value: uptime, inline: true },
+        { name: '🕐 Time', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
+      ],
+      footer: { text: 'Bepo will restart automatically via PM2' },
+      timestamp: new Date().toISOString()
+    };
+
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ embeds: [embed] })
+    });
+    
+    console.log('Shutdown webhook sent successfully');
+  } catch (error) {
+    console.error('Failed to send shutdown webhook:', error);
+  }
+}
+
+// Send webhook notification on crash recovery (startup after unclean shutdown)
+async function sendCrashRecoveryWebhook() {
+  const webhookUrl = process.env.DISCORD_ALERT_WEBHOOK;
+  if (!webhookUrl) {
+    console.log('No DISCORD_ALERT_WEBHOOK configured, skipping crash recovery notification');
+    return;
+  }
+
+  try {
+    const embed = {
+      title: '⚠️ Bepo Recovered from Crash',
+      color: 0xFF0000, // Red for crash recovery
+      description: 'Bot restarted after an unexpected shutdown (crash, OOM, or system restart).',
+      fields: [
+        { name: '🔄 Status', value: 'Back online', inline: true },
+        { name: '🕐 Recovered', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
+      ],
+      footer: { text: 'PM2 automatically restarted the bot' },
+      timestamp: new Date().toISOString()
+    };
+
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ embeds: [embed] })
+    });
+    
+    console.log('Crash recovery webhook sent successfully');
+  } catch (error) {
+    console.error('Failed to send crash recovery webhook:', error);
   }
 }
 
@@ -440,6 +582,16 @@ client.markov = markov;
 client.on("clientReady", async () => {
   console.log(`Bot is ready as: ${client.user.tag}`);
 
+  // Check if last shutdown was clean (crash detection)
+  const wasClean = wasLastShutdownClean();
+  if (!wasClean) {
+    console.log('⚠️ Detected unclean shutdown - sending crash recovery notification');
+    await sendCrashRecoveryWebhook();
+  }
+  
+  // Mark bot as running (will be marked clean on graceful shutdown)
+  markBotRunning();
+
   // Auto-deploy commands on startup (ensures commands are always up to date)
   console.log('Auto-deploying slash commands...');
   try {
@@ -484,17 +636,7 @@ client.on("clientReady", async () => {
 
   // Initialize health monitoring with Discord client
   healthMonitor.setDiscordClient(client);
-  console.log(`Health monitoring started`);
-
-  // Initialize Unified Monitoring Service - this replaces the old offline notification system
-  try {
-    const unifiedMonitor = new UnifiedMonitoringService();
-    // Store the monitor instance on the client for access elsewhere
-    client.unifiedMonitor = unifiedMonitor;
-    console.log('Unified monitoring service initialized');
-  } catch (error) {
-    console.error('Failed to initialize unified monitoring service:', error);
-  }
+  console.log(`Health monitoring started (with Healthchecks.io integration)`);
 
   startScheduledMessaging(client);
   console.log("Scheduled messaging started");
@@ -530,6 +672,32 @@ client.on("clientReady", async () => {
       const expiredServerCount = await cleanupExpiredServerMemories();
       const threadCount = await cleanupOldMessageThreads(7); // Clean up threads older than 7 days
       console.log(`🧹 Cleaned up ${expiredCount} expired user memories, ${oldCount} old user memories, ${expiredServerCount} expired server memories, and ${threadCount} old thread messages`);
+      
+      // Clean up old log files (14 days retention)
+      const logsDir = path.join(process.cwd(), 'logs');
+      const now = Date.now();
+      const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+      let logFilesDeleted = 0;
+      
+      try {
+        const files = fs.readdirSync(logsDir);
+        for (const file of files) {
+          // Match health-YYYY-MM-DD.json and critical-errors-YYYY-MM-DD.json
+          const match = file.match(/^(health|critical-errors)-(\d{4}-\d{2}-\d{2})\.json$/);
+          if (match) {
+            const fileDate = new Date(match[2]);
+            if (now - fileDate.getTime() > fourteenDaysMs) {
+              fs.unlinkSync(path.join(logsDir, file));
+              logFilesDeleted++;
+            }
+          }
+        }
+        if (logFilesDeleted > 0) {
+          console.log(`🧹 Deleted ${logFilesDeleted} log files older than 14 days`);
+        }
+      } catch (logCleanupError) {
+        console.error('Log cleanup error:', logCleanupError);
+      }
     }, (error) => {
       handleDatabaseError(error, 'memory_cleanup');
       console.error('Memory cleanup error - will retry next cycle:', error);

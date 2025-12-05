@@ -63,6 +63,12 @@ const main = async () => {
 
   await deploy(commands, rest, clientId, guildList);
   spinner.stop();
+  
+  // Explicitly exit to prevent hanging from imported modules with timers/listeners
+  process.exit(0);
 };
 
-main().catch(console.error.bind(console));
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

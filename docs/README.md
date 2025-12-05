@@ -2,9 +2,20 @@
 
 A feature-rich Discord bot powered by AI with memory, server management, gaming utilities, and more.
 
-## Recent Updates (July 2025)
+## Recent Updates (December 2025)
 
-### Major Refactoring & Improvements
+### PM2 & Healthchecks.io Migration
+
+- Migrated from tmux to PM2 for process management
+- Added Healthchecks.io integration for external dead-man's switch monitoring
+- Added launchd for boot persistence (macOS)
+- Auto-restart on crash (max 10 restarts, 5s delay)
+- Memory limit auto-restart at 500MB
+- 14-day automatic log retention for health and error logs
+- Discord webhook notifications on shutdown/crash
+- Removed deprecated monitor-service and offline-response systems (archived)
+
+### Major Refactoring & Improvements (July 2025)
 
 - Code organization refactored for better maintainability and performance
 - Business logic separated from commands into dedicated utility modules
@@ -40,6 +51,8 @@ A feature-rich Discord bot powered by AI with memory, server management, gaming 
 
 ### Health Monitoring & Reliability
 
+- External monitoring via Healthchecks.io (30s dead-man's switch)
+- PM2 process management with auto-restart and memory limits
 - Real-time bot performance monitoring with detailed statistics
 - Different error handling for Discord, database, and AI errors
 - Comprehensive error logging with categorization and recovery tracking
@@ -151,16 +164,26 @@ A feature-rich Discord bot powered by AI with memory, server management, gaming 
 **New to Bepo?** Check out the **[Simplified Bepo Guide](./BEPO_GUIDE.md)** for:
 
 - APEX Mode setup (gaming notifications)
-- OFFLINE Mode features (continuous operation)
 - Essential commands and testing scenarios
+
+### First-Time Setup
+
+```bash
+npm install               # Install dependencies
+npm run pm2:setup         # Install PM2, configure launchd, start bot
+```
 
 ### Core Operations
 
 ```bash
-npm start                 # Start Bepo with all services
-npm stop                  # Stop all Bepo services
-npm run status           # Check bot health
-npm restart              # Restart everything
+npm start                 # Start bot with PM2
+npm stop                  # Stop bot
+npm restart               # Restart bot
+npm run start:full        # Deploy commands + start + save
+npm run restart:full      # Deploy commands + restart + save
+npm run dev               # Run directly (development)
+npm run pm2:logs          # View live logs
+npm run pm2:monit         # Real-time dashboard
 ```
 
 ---
@@ -192,11 +215,13 @@ npm restart              # Restart everything
 
 ### 🏥 **Health Monitoring Features**
 
+- **External Monitoring**: Healthchecks.io dead-man's switch with Discord alerts
+- **PM2 Management**: Auto-restart, memory limits, log rotation
 - **System Metrics**: Memory usage, uptime tracking, response time monitoring
 - **Error Categorization**: Detailed logging and classification of all issues
 - **Recovery Tracking**: Monitoring of automatic recovery attempts and success rates
-- **Critical Alerts**: Immediate notification system for severe errors
-- **Daily Health Logs**: Comprehensive health status reporting and trend analysis
+- **Critical Alerts**: Immediate Discord webhook notification for shutdowns/crashes
+- **Daily Health Logs**: 14-day retention with automatic cleanup
 
 ## Technical Architecture
 
@@ -213,7 +238,7 @@ npm restart              # Restart everything
 - `digestUtils.js`: AI-powered server analysis and digest generation
 - `threadUtils.js`: Thread creation, management, and AI topic generation
 - `errorHandler.js`: Centralized error handling with retry logic
-- `healthMonitor.js`: System health tracking and performance metrics
+- `healthMonitor.js`: System health tracking, Healthchecks.io integration, and performance metrics
 
 ### Reliability Features
 
@@ -243,8 +268,9 @@ npm run test:integration                   # Run integration tests only
 
 ```bash
 npm run deploy                             # Deploy slash commands to Discord
-npm start                                  # Start the bot in production
-npm run dev                               # Start in development mode
+npm run pm2:start                          # Start the bot with PM2
+npm run dev                               # Start in development mode (no PM2)
+./scripts/pm2-setup.sh                     # First-time setup (PM2 + launchd)
 ```
 
 ## Configuration & Environment
@@ -264,6 +290,10 @@ OPENAI_KEY=your_openai_api_key
 # Database
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
+
+# Monitoring & Alerts
+HEALTHCHECK_PING_URL=your_healthchecks_io_ping_url
+DISCORD_ALERT_WEBHOOK=your_discord_webhook_url
 
 # System Configuration
 PREFIX=your_bot_prefix

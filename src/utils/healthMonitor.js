@@ -1,4 +1,5 @@
 // healthMonitor.js - Enhanced health monitoring with online/offline status tracking
+// Now includes Healthchecks.io dead-man's switch integration
 import fs from 'fs';
 import path from 'path';
 import errorHandler from './errorHandler.js';
@@ -14,13 +15,54 @@ class HealthMonitor {
         this.statusFile = path.join(process.cwd(), 'logs', 'bot-status.json');
         this.isOnline = true;
         this.discordClient = null;
-        this.setupHealthChecks();
+        this.healthcheckUrl = process.env.HEALTHCHECK_PING_URL || null;
+        this.isInitialized = false; // Track if health checks have been started
+        // Don't start health checks here - wait for Discord client to be set
         this.createInitialStatusFile();
+    }
+
+    /**
+     * Ping Healthchecks.io endpoint
+     * @param {string} status - 'success', 'fail', or 'start'
+     */
+    async pingHealthcheck(status = 'success') {
+        if (!this.healthcheckUrl) return;
+
+        try {
+            let url = this.healthcheckUrl;
+            if (status === 'fail') {
+                url = `${this.healthcheckUrl}/fail`;
+            } else if (status === 'start') {
+                url = `${this.healthcheckUrl}/start`;
+            }
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5000);
+
+            await fetch(url, { 
+                method: 'GET',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeout);
+        } catch (error) {
+            // Silent fail - don't let healthcheck ping failure affect the bot
+            if (error.name !== 'AbortError') {
+                console.error('[HealthMonitor] Failed to ping healthchecks.io:', error.message);
+            }
+        }
     }
 
     setDiscordClient(client) {
         this.discordClient = client;
         this.setupDiscordEventListeners();
+        
+        // Start health checks only when Discord client is set (bot is actually running)
+        if (!this.isInitialized) {
+            this.isInitialized = true;
+            this.startTime = Date.now(); // Reset start time when bot actually starts
+            this.setupHealthChecks();
+        }
         
         // If client is already ready when we set it, update status immediately
         if (client && client.isReady()) {
@@ -103,6 +145,9 @@ class HealthMonitor {
     }
 
     setupHealthChecks() {
+        // Send startup ping to healthchecks.io
+        this.pingHealthcheck('start');
+
         // Periodic health checks
         setInterval(() => {
             this.performHealthCheck();
@@ -113,9 +158,17 @@ class HealthMonitor {
             this.logHealthStatus();
         }, this.logInterval);
 
-        // Heartbeat to update status file
-        setInterval(() => {
+        // Heartbeat to update status file AND ping healthchecks.io
+        setInterval(async () => {
             this.updateStatusFile();
+            
+            // Ping healthchecks.io based on current health
+            const health = errorHandler.getHealthStatus();
+            if (this.isOnline && health.healthy && this.discordClient?.isReady()) {
+                await this.pingHealthcheck('success');
+            } else {
+                await this.pingHealthcheck('fail');
+            }
         }, this.heartbeatInterval);
 
         // Initial health check after startup
@@ -252,6 +305,14 @@ class HealthMonitor {
             } : null,
             lastHealthCheck: new Date(this.lastHealthCheck).toISOString()
         };
+    }
+
+    // Method to signal shutdown - pings healthchecks.io with /fail
+    async signalShutdown() {
+        console.log('[HealthMonitor] Signaling shutdown to healthchecks.io...');
+        this.isOnline = false;
+        this.updateStatusFile();
+        await this.pingHealthcheck('fail');
     }
 
     // Method to read status from file (can be used externally even when bot is offline)

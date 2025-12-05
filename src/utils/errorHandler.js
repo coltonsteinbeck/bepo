@@ -40,41 +40,8 @@ class ErrorHandler {
             }
         });
 
-        // Handle SIGTERM for graceful shutdown
-        process.on('SIGTERM', () => {
-            console.log(' SIGTERM received, attempting graceful shutdown...');
-            this.attemptGracefulShutdown(new Error('SIGTERM received'));
-        });
-
-        // Handle SIGINT (Ctrl+C)
-        process.on('SIGINT', () => {
-            console.log(' SIGINT received, attempting graceful shutdown...');
-            this.attemptGracefulShutdown(new Error('SIGINT received'));
-        });
-    }
-
-    attemptGracefulShutdown(error) {
-        console.log(' Attempting graceful shutdown...');
-        
-        // Give the process 10 seconds to cleanup gracefully
-        const shutdownTimer = setTimeout(() => {
-            console.error('Graceful shutdown timed out, forcing exit');
-            process.exit(1);
-        }, 10000);
-
-        try {
-            // Emit shutdown event for cleanup
-            process.emit('SHUTDOWN', error);
-            
-            // Clear the timer if we get here
-            clearTimeout(shutdownTimer);
-            
-            // Exit with error code
-            process.exit(1);
-        } catch (shutdownError) {
-            console.error('Error during graceful shutdown:', shutdownError);
-            process.exit(1);
-        }
+        // Note: SIGTERM/SIGINT handlers are in bot.js for graceful shutdown
+        // We don't duplicate them here to avoid conflicts
     }
 
     logCriticalError(type, error) {
