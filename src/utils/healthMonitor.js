@@ -39,11 +39,11 @@ class HealthMonitor {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 5000);
 
-            await fetch(url, { 
+            await fetch(url, {
                 method: 'GET',
                 signal: controller.signal
             });
-            
+
             clearTimeout(timeout);
         } catch (error) {
             // Silent fail - don't let healthcheck ping failure affect the bot
@@ -56,14 +56,14 @@ class HealthMonitor {
     setDiscordClient(client) {
         this.discordClient = client;
         this.setupDiscordEventListeners();
-        
+
         // Start health checks only when Discord client is set (bot is actually running)
         if (!this.isInitialized) {
             this.isInitialized = true;
             this.startTime = Date.now(); // Reset start time when bot actually starts
             this.setupHealthChecks();
         }
-        
+
         // If client is already ready when we set it, update status immediately
         if (client && client.isReady()) {
             this.isOnline = true;
@@ -161,7 +161,7 @@ class HealthMonitor {
         // Heartbeat to update status file AND ping healthchecks.io
         setInterval(async () => {
             this.updateStatusFile();
-            
+
             // Ping healthchecks.io based on current health
             const health = errorHandler.getHealthStatus();
             if (this.isOnline && health.healthy && this.discordClient?.isReady()) {
@@ -179,7 +179,7 @@ class HealthMonitor {
 
     performHealthCheck() {
         const health = errorHandler.getHealthStatus();
-        
+
         // Log health status
         console.log(`Health Check - ${new Date().toISOString()}`);
         console.log(`   Online: ${this.isOnline ? 'ONLINE' : 'OFFLINE'}`);
@@ -192,7 +192,7 @@ class HealthMonitor {
         if (this.discordClient?.ws?.ping) {
             console.log(`   Discord Ping: ${this.discordClient.ws.ping}ms`);
         }
-        
+
         // Alert on unhealthy status
         if (!health.healthy) {
             console.warn('HEALTH ALERT: Bot is in unhealthy state!');
@@ -266,7 +266,7 @@ class HealthMonitor {
     getUptimeStats() {
         const uptimeSeconds = Math.floor((Date.now() - this.startTime) / 1000);
         const health = errorHandler.getHealthStatus();
-        
+
         return {
             startTime: new Date(this.startTime).toISOString(),
             uptimeSeconds,
@@ -282,7 +282,7 @@ class HealthMonitor {
     getHealthSummary() {
         const health = errorHandler.getHealthStatus();
         const uptime = this.getUptimeStats();
-        
+
         return {
             online: this.isOnline,
             status: this.isOnline ? 'ONLINE' : 'OFFLINE',
@@ -333,11 +333,11 @@ class HealthMonitor {
     static isBotOnline() {
         const status = HealthMonitor.getStatusFromFile();
         if (!status) return false;
-        
+
         const lastUpdate = new Date(status.lastUpdated);
         const now = new Date();
         const timeDiff = now - lastUpdate;
-        
+
         // Consider offline if no update in last 2 minutes
         return timeDiff < 2 * 60 * 1000 && status.botStatus.isOnline;
     }

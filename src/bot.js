@@ -160,9 +160,9 @@ async function handleShutdownSignal(signal) {
     return;
   }
   isShuttingDown = true;
-  
+
   console.log(`🛑 ${signal} received, shutting down gracefully...`);
-  
+
   try {
     await gracefulShutdown();
   } catch (err) {
@@ -372,7 +372,7 @@ async function sendShutdownWebhook() {
   try {
     const uptimeMs = Date.now() - (healthMonitor.startTime || Date.now());
     const uptime = formatUptime(Math.floor(uptimeMs / 1000));
-    
+
     const embed = {
       title: '🛑 Bepo Shutting Down',
       color: 0xFFA500, // Orange for intentional shutdown
@@ -390,7 +390,7 @@ async function sendShutdownWebhook() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ embeds: [embed] })
     });
-    
+
     console.log('Shutdown webhook sent successfully');
   } catch (error) {
     console.error('Failed to send shutdown webhook:', error);
@@ -423,7 +423,7 @@ async function sendCrashRecoveryWebhook() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ embeds: [embed] })
     });
-    
+
     console.log('Crash recovery webhook sent successfully');
   } catch (error) {
     console.error('Failed to send crash recovery webhook:', error);
@@ -588,7 +588,7 @@ client.on("clientReady", async () => {
     console.log('⚠️ Detected unclean shutdown - sending crash recovery notification');
     await sendCrashRecoveryWebhook();
   }
-  
+
   // Mark bot as running (will be marked clean on graceful shutdown)
   markBotRunning();
 
@@ -672,13 +672,13 @@ client.on("clientReady", async () => {
       const expiredServerCount = await cleanupExpiredServerMemories();
       const threadCount = await cleanupOldMessageThreads(7); // Clean up threads older than 7 days
       console.log(`🧹 Cleaned up ${expiredCount} expired user memories, ${oldCount} old user memories, ${expiredServerCount} expired server memories, and ${threadCount} old thread messages`);
-      
+
       // Clean up old log files (14 days retention)
       const logsDir = path.join(process.cwd(), 'logs');
       const now = Date.now();
       const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
       let logFilesDeleted = 0;
-      
+
       try {
         const files = fs.readdirSync(logsDir);
         for (const file of files) {

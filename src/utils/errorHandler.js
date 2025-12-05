@@ -17,7 +17,7 @@ class ErrorHandler {
         process.on('uncaughtException', (error) => {
             this.logCriticalError('UNCAUGHT_EXCEPTION', error);
             console.error(' CRITICAL: Uncaught Exception detected!', error);
-            
+
             // Try to gracefully shutdown instead of crashing
             this.attemptGracefulShutdown(error);
         });
@@ -27,7 +27,7 @@ class ErrorHandler {
             this.logCriticalError('UNHANDLED_REJECTION', reason);
             console.error(' CRITICAL: Unhandled Promise Rejection detected!', reason);
             console.error('Promise:', promise);
-            
+
             // Log but don't crash - many promise rejections are recoverable
             this.trackError('unhandled_rejection');
         });
@@ -60,7 +60,7 @@ class ErrorHandler {
         };
 
         this.criticalErrors.push(errorInfo);
-        
+
         // Keep only last 100 critical errors
         if (this.criticalErrors.length > 100) {
             this.criticalErrors.shift();
@@ -79,7 +79,7 @@ class ErrorHandler {
 
             const logFile = path.join(logDir, `critical-errors-${new Date().toISOString().split('T')[0]}.json`);
             const logEntry = JSON.stringify(errorInfo, null, 2) + '\n';
-            
+
             fs.appendFileSync(logFile, logEntry);
         } catch (logError) {
             console.error('Failed to write error log:', logError);
@@ -90,10 +90,10 @@ class ErrorHandler {
         const now = Date.now();
         const hourKey = Math.floor(now / (1000 * 60 * 60));
         const key = `${errorType}_${hourKey}`;
-        
+
         const count = this.errorCounts.get(key) || 0;
         this.errorCounts.set(key, count + 1);
-        
+
         // Clean up old error counts (older than 2 hours)
         for (const [countKey] of this.errorCounts) {
             const [, hour] = countKey.split('_');
@@ -101,13 +101,13 @@ class ErrorHandler {
                 this.errorCounts.delete(countKey);
             }
         }
-        
+
         // Check if we're hitting error limits
         if (count >= this.maxErrorsPerHour) {
             console.warn(`High error rate detected for ${errorType}: ${count} errors this hour`);
             return true; // Indicates high error rate
         }
-        
+
         return false;
     }
 
@@ -146,7 +146,7 @@ class ErrorHandler {
             } catch (error) {
                 console.error(` Safe async operation failed in ${context}:`, error);
                 this.logError(error, context);
-                
+
                 if (attempt === maxRetries) {
                     // Last attempt failed
                     if (typeof fallback === 'function') {
@@ -159,7 +159,7 @@ class ErrorHandler {
                     }
                     return fallback;
                 }
-                
+
                 // Wait before retry
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
             }
@@ -173,7 +173,7 @@ class ErrorHandler {
         } catch (error) {
             console.error(`Safe sync operation failed in ${context}:`, error);
             this.logError(error, context);
-            
+
             if (typeof fallback === 'function') {
                 try {
                     return fallback(error);
@@ -182,7 +182,7 @@ class ErrorHandler {
                     return null;
                 }
             }
-            
+
             return fallback;
         }
     }
@@ -191,7 +191,7 @@ class ErrorHandler {
     getHealthStatus() {
         const now = Date.now();
         const hourKey = Math.floor(now / (1000 * 60 * 60));
-        
+
         let totalErrors = 0;
         for (const [key, count] of this.errorCounts) {
             const [, hour] = key.split('_');
@@ -201,7 +201,7 @@ class ErrorHandler {
         }
 
         const memoryUsage = process.memoryUsage();
-        
+
         return {
             healthy: totalErrors < this.maxErrorsPerHour && this.criticalErrors.length === 0,
             errorCount: totalErrors,
@@ -220,7 +220,7 @@ class ErrorHandler {
     handleDiscordError(error, interaction = null, context = 'discord') {
         const errorMessage = error.message || String(error);
         const errorCode = error.code || 'UNKNOWN';
-        
+
         console.error(` Discord error in ${context}:`, {
             code: errorCode,
             message: errorMessage,
@@ -234,7 +234,7 @@ class ErrorHandler {
             console.warn('Interaction expired or already acknowledged');
             return false; // Don't retry
         }
-        
+
         if (errorCode === 50013) { // Missing permissions
             console.warn('Bot missing required permissions');
             if (interaction && !interaction.replied && !interaction.deferred) {
@@ -342,24 +342,24 @@ class ErrorHandler {
     createRetryWrapper(maxRetries = 3, baseDelay = 1000) {
         return async (operation, context = 'operation') => {
             let lastError;
-            
+
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     return await operation();
                 } catch (error) {
                     lastError = error;
                     console.warn(` Attempt ${attempt}/${maxRetries} failed for ${context}:`, error.message);
-                    
+
                     if (attempt === maxRetries) {
                         break; // Don't delay on final attempt
                     }
-                    
+
                     // Exponential backoff with jitter
                     const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
-            
+
             console.error(` All retry attempts failed for ${context}:`, lastError);
             throw lastError;
         };
