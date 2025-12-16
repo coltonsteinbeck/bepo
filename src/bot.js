@@ -440,6 +440,27 @@ client.markov = markov;
 client.on("clientReady", async () => {
   console.log(`Bot is ready as: ${client.user.tag}`);
 
+  // Auto-deploy commands on startup (ensures commands are always up to date)
+  console.log('Auto-deploying slash commands...');
+  try {
+    const { REST, Routes } = await import('discord.js');
+    const { getAllGuilds } = await import('./supabase/supabase.js');
+    
+    const rest = new REST().setToken(process.env.BOT_TOKEN);
+    const commandsData = Array.from(client.commands.values()).map(cmd => cmd.data.toJSON());
+    const guilds = await getAllGuilds();
+    
+    for (const guild of guilds) {
+      await rest.put(
+        Routes.applicationGuildCommands(client.user.id, guild.guild_id),
+        { body: commandsData }
+      );
+    }
+    console.log(`Deployed ${commandsData.length} commands to ${guilds.length} guilds`);
+  } catch (error) {
+    console.error('Failed to auto-deploy commands:', error);
+  }
+
   // Set user mappings for markov chain
   markov.setUserMappings(client);
   console.log(`Markov chain configured with ${client.users.cache.size} user mappings`);

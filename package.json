@@ -9,7 +9,7 @@
     "dotenv": "^16.3.1",
     "gifwrap": "^0.10.1",
     "libsodium-wrappers": "^0.7.13",
-    "openai": "^6.2.0",
+    "openai": "^6.14.0",
     "ora": "^7.0.1",
     "play-dl": "^1.9.7",
     "sharp": "^0.34.4",
@@ -29,7 +29,6 @@
     "deploy": "node --no-deprecation scripts/deploy-commands.js",
     "delete": "node --no-deprecation scripts/delete-commands.js",
     "generate": "node --no-deprecation src/dalle/cli.js generate",
-    
     "start": "node --no-deprecation src/bot.js",
     "start:quick": "./scripts/start-bepo.sh",
     "start:full": "node --no-deprecation src/bot.js & node --no-deprecation scripts/monitor-service.js & node --no-deprecation scripts/offline-response-system.js",
@@ -37,28 +36,23 @@
     "start:bot-direct": "node --no-deprecation src/bot.js",
     "start:monitor": "node --no-deprecation scripts/monitor-service.js",
     "start:offline": "node --no-deprecation scripts/offline-response-system.js",
-    
     "stop": "./scripts/stop-bepo.sh",
     "stop:all": "pkill -f 'node.*src/bot.js' || true; pkill -f 'node.*monitor-service.js' || true; pkill -f 'node.*offline-response-system.js' || true",
     "stop:bot": "./scripts/stop-bot-only.sh",
     "stop:monitor": "pkill -f 'node.*monitor-service.js' || true",
     "stop:offline": "pkill -f 'node.*offline-response-system.js' || true",
     "restart": "npm run stop && sleep 2 && npm run start",
-    
     "dev": "node --no-deprecation src/bot.js",
-    
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    
     "health": "node scripts/health-dashboard.js",
     "health:once": "node scripts/health-dashboard.js 0",
     "status": "./scripts/bepo-status.sh",
     "status:detailed": "node scripts/check-bot-status-detailed.js",
-    
     "logs": "node scripts/log-manager.js list",
     "logs:tail": "node scripts/log-manager.js tail",
     "logs:follow": "node scripts/log-manager.js follow",
@@ -71,18 +65,14 @@
     "logs:offline": "tail -f logs/offlineOutput.log",
     "logs:all": "tail -f logs/serverOutput.log logs/monitorOutput.log logs/offlineOutput.log",
     "logs:rotate": "./scripts/rotate-logs.sh",
-    
     "monitor": "node scripts/bot-monitor.js",
     "setup-webhooks": "node scripts/setup-webhook-notifications.js",
     "setup-offline-responses": "node scripts/setup-offline-responses.js",
     "validate-offline": "node scripts/validate-offline-setup.js",
-    
     "cleanup": "node scripts/cleanup-repo.js",
     "cleanup:dry": "node scripts/cleanup-repo.js --dry-run",
     "cleanup:force": "node scripts/cleanup-repo.js --force",
-    
     "dev:helper": "node scripts/dev-helper.js",
-    
     "prestart": "npm run test",
     "prebuild": "npm run test"
   },

@@ -14,20 +14,76 @@ const geminiAI = new OpenAI({
   baseURL: "https://generativelanguage.googleapis.com/v1alpha/openai/",
 });
 
+const openAI = new OpenAI({
+  apiKey: process.env.OPENAI_KEY,
+});
+
 /**
  * Generates an image based on the prompt and provider.
  * @param {Object} options
  * @param {string} options.prompt - The image description.
- * @param {string} options.provider - 'grok' or 'gemini'.
- * @param {string} [options.referenceImageUrl] - URL of a reference image (Gemini only).
- * @returns {Promise<Buffer>} The generated image buffer.
+ * @param {string} options.provider - 'grok', 'gemini', or 'gpt-image-1.5'.
+ * @param {string} [options.referenceImageUrl] - URL of a reference image (Gemini and GPT Image 1.5).
+ * @returns {Promise<{buffer: Buffer, modelUsed: string}>} The generated image buffer and model used.
  */
 export async function generateImage({ prompt, provider, referenceImageUrl }) {
   if (provider === "gemini") {
-    return generateWithGemini(prompt, referenceImageUrl);
+    const buffer = await generateWithGemini(prompt, referenceImageUrl);
+    return { buffer, modelUsed: "Nano Banana Pro" };
+  } else if (provider === "gpt-image-1.5") {
+    return generateWithGPTImage(prompt, referenceImageUrl);
   } else {
-    return generateWithGrok(prompt);
+    const buffer = await generateWithGrok(prompt);
+    return { buffer, modelUsed: "Grok" };
   }
+}
+
+async function generateWithGPTImage(prompt, referenceImageUrl) {
+  console.log(`[ImageGen] Generating with GPT Image: ${prompt}`);
+  
+  // Note: Reference images not yet supported by GPT Image models
+  if (referenceImageUrl) {
+    console.warn("[ImageGen] Reference images not yet supported by GPT Image, ignoring reference");
+  }
+
+  const models = ["gpt-image-1.5", "gpt-image-1"];
+  
+  for (const model of models) {
+    try {
+      console.log(`[ImageGen] Trying model: ${model}`);
+      
+      const response = await openAI.images.generate({
+        model: model,
+        prompt: prompt,
+        n: 1,
+        size: "1024x1024"
+      });
+
+      // Fetch the image from the returned URL
+      if (response.data && response.data[0] && (response.data[0].url || response.data[0].b64_json)) {
+        console.log(`[ImageGen] Successfully generated image with ${model}`);
+        const modelDisplayName = model === "gpt-image-1.5" ? "GPT Image 1.5" : "GPT Image 1";
+        if (response.data[0].url) {
+          const imgResult = await fetch(response.data[0].url);
+          const arrayBuffer = await imgResult.arrayBuffer();
+          return { buffer: Buffer.from(arrayBuffer), modelUsed: modelDisplayName };
+        } else {
+          return { buffer: Buffer.from(response.data[0].b64_json, "base64"), modelUsed: modelDisplayName };
+        }
+      }
+    } catch (error) {
+      console.warn(`[ImageGen] Model ${model} failed: ${error.message}`);
+      // If this isn't the last model, continue to next
+      if (model !== models[models.length - 1]) {
+        console.log(`[ImageGen] Falling back to next model...`);
+        continue;
+      }
+      // Last model failed, throw the error
+      throw error;
+    }
+  }
+  
+  throw new Error("No image data returned from GPT Image");
 }
 
 async function generateWithGrok(prompt) {

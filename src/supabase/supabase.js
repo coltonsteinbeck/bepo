@@ -35,6 +35,35 @@ async function getAllGuilds() {
 
 // Function to get channels Markov can run in with retry logic
 async function getMarkovChannels(retries = 3) {
+  // First, test basic connectivity
+  try {
+    console.log('🔍 Testing Supabase connection...');
+    const { data: testData, error: testError } = await supabase
+      .from('channels')
+      .select('count')
+      .limit(1)
+      .single();
+    
+    if (testError && testError.code === 'PGRST116') {
+      // Table exists but might be empty, that's ok
+      console.log('✅ Supabase connection successful (table exists but empty)');
+    } else if (testError) {
+      console.error('❌ Supabase connection test failed:', testError);
+      throw new Error(`Database connection issue: ${testError.message}`);
+    } else {
+      console.log('✅ Supabase connection successful');
+    }
+  } catch (connError) {
+    console.error('❌ CRITICAL: Cannot connect to Supabase database');
+    console.error('   Error:', connError.message);
+    console.error('   Check:');
+    console.error('   1. Is your internet connection working?');
+    console.error('   2. Is SUPABASE_URL correct in .env?');
+    console.error('   3. Is SUPABASE_KEY correct in .env?');
+    console.error('   4. Is the Supabase project online?');
+    return []; // Return empty array instead of crashing
+  }
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const { data, error } = await supabase
@@ -46,24 +75,26 @@ async function getMarkovChannels(retries = 3) {
         throw error;
       }
 
-      console.log(`Successfully fetched ${data?.length || 0} markov channels`);
+      console.log(`✅ Successfully fetched ${data?.length || 0} markov channels`);
       return data || [];
     } catch (error) {
-      console.error(`Error fetching channels (attempt ${attempt}/${retries}):`, {
+      console.error(`❌ Error fetching channels (attempt ${attempt}/${retries}):`, {
         message: error.message,
-        details: error.stack,
+        name: error.name,
         hint: error.hint || '',
-        code: error.code || ''
+        code: error.code || '',
+        details: error.details || ''
       });
 
       if (attempt === retries) {
-        console.error('Failed to fetch markov channels after all retries, using empty array');
+        console.error('⚠️  Failed to fetch markov channels after all retries, using empty array');
+        console.error('   Bot will continue but Markov functionality may be limited');
         return [];
       }
 
       // Wait before retrying (exponential backoff)
       const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-      console.log(`Retrying in ${delay}ms...`);
+      console.log(`⏳ Retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
